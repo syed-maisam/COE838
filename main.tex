@@ -1,0 +1,568 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{siunitx}
+\usepackage{listings}
+
+\usepackage{graphicx}
+\usepackage{caption}
+
+\captionsetup[figure]{labelsep=colon, name=Figure}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{HPS/FPGA Based MD5 Decryption SoC\\
+{\footnotesize \textsuperscript{*}COE838: Systems-on-Chip Design
+}
+}
+
+\author{\IEEEauthorblockN{Syed Maisam Abbas}
+\IEEEauthorblockA{\textit{ECB Department (Electrical, Computer, and Biomedical Engineering))} \\
+\textit{Toronto Metropolitan University - Electrical Engineering (BEng))}\\
+Toronto, Ontario \\
+maisam.abbas@torontomu.ca}
+}
+
+\maketitle
+
+\begin{abstract}
+This paper presents the design and implementation of a high-performance System-on-Chip (SoC) for MD5 decryption, leveraging a heterogeneous HPS/FPGA architecture on the Intel Cyclone V DE1-SoC platform. While software-based cryptographic execution often suffers from sequential processing bottlenecks, this research utilizes the FPGA fabric to orchestrate 32 parallel MD5 hashing engines, significantly enhancing throughput and real-time performance. The system architecture integrates an ARM-based Hard Processor System (HPS) running Yocto Linux with custom RTL logic via the Avalon Memory-Mapped (MM) slave interface and a Lightweight HPS-to-FPGA bridge. Experimental validation was conducted through a series of hardware-level arithmetic tests, where the SoC functioned as a manual 8-bit multiplier (0--255) utilizing onboard GPIO peripherals. Results demonstrate that the hardware acceleration provides near-zero latency for bitwise operations and a constant hash rate across varying execution times. The successful integration of memory-mapped control signals and physical I/O feedback confirms the efficiency of the HPS/FPGA co-design for complex, real-time cryptographic applications.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Hardware, Software, Real-time, HPS (Hard Processor System), FPGA (Field-Programmable Gate Array), SoC (System on a Chip), Verilog, VHDL, Avalon MM slaves, Yocto Linux OS, MD5 Decryption, Multiplier
+\end{IEEEkeywords}
+
+\section{Introduction}
+The rapid evolution of digital communication has necessitated the development of robust cryptographic frameworks to ensure data integrity and security. Among these, the Message Digest Algorithm 5 (MD5) remains a cornerstone for verifying data consistency, despite the emergence of more complex hashing standards. However, the computational overhead associated with executing 32 simultaneous MD5 engines in a purely software-based environment often leads to significant performance bottlenecks. This research addresses these limitations by developing a high-performance System-on-Chip (SoC) that utilizes a heterogeneous Hard Processor System (HPS) and Field-Programmable Gate Array (FPGA) architecture. By offloading the intensive hashing operations to dedicated RTL logic within the FPGA fabric, the system achieves parallel processing capabilities that far exceed traditional sequential execution.
+The goal of this research is to use the combined capabilities of a heterogeneous HPS/FPGA architecture to develop and implement a high-performance System-on-Chip (SoC) for MD5 decryption (RTL adapted from Howard Mao's Verilog MD5 Cracker core). In order to determine the fundamental hardware properties and time restrictions, the development process starts with a thorough examination of the supplied VHDL IP cores and the test benches that go along with them. Custom Avalon Memory-Mapped (MM) slave interfaces will be designed to bridge the gap between software control and hardware acceleration, enabling smooth communication between the CPU and the FPGA fabric.
+
+The primary objective of this study is to implement a scalable MD5 decryption core, adapted from Howard Mao's Verilog MD5 Cracker, onto the Intel Cyclone V SoC platform. The development lifecycle begins with a rigorous analysis of VHDL IP cores and their respective functional simulations in ModelSim to establish baseline timing constraints and hardware properties. A critical component of this architecture is the design of custom Avalon Memory-Mapped (MM) slave interfaces. These interfaces serve as the communication backbone, allowing the ARM-based HPS to orchestrate the FPGA hardware through a 32-bit Lightweight HPS-to-FPGA bridge. This hardware-software co-design ensures that while the HPS manages high-level task scheduling and real-time statistics under a Yocto Linux environment, the FPGA handles the heavy bitwise operations at peak hardware frequencies.
+
+Furthermore, this report details the integration of physical I/O peripherals on the DE1-SoC board, such as sliding switches, LEDs, and seven-segment displays, to facilitate manual data entry and real-time result verification. To validate the arithmetic reliability of the SoC, the system is also configured to perform hardware-level multiplication using 8-bit variables entered via the board's GPIO pins. Through a systematic "Capture, Execute, and Reset" methodology, this research demonstrates how custom RTL can be seamlessly integrated into a processor-centric system to provide a versatile, real-time solution for complex cryptographic and arithmetic tasks
+
+\section{PAST WORK / REVIEW}
+
+\indent The image (Figure 1) captures a critical step in the FPGA design flow using Intel Quartus Prime. Specifically, it shows the successful execution of the hps\_sdram\_p0\_pin\_assignments.tcl script within the Tcl Scripts dialog. This process is essential when working with SoC (System on Chip) architectures, as it automates the complex task of mapping the physical pins of the FPGA package to the logic signals of the Hard Processor System (HPS) memory interface.
+Without this script, the DDR3 memory connected to the processor would not have its timing constraints or pin locations correctly defined in the Quartus project. This would lead to a design that might compile without errors but would fail immediately upon deployment, as the HPS would be unable to communicate with its external RAM. By running this script, the developer ensures that the hardware signals follow the precise electrical and timing requirements dictated by the Cyclone V (or equivalent) SoC hardware.
+In the context of the MD5 RTL project, this step confirms that the system’s "brain" (the HPS) is correctly wired to its memory before the custom MD5 hashing logic is integrated into the FPGA fabric. Once the Tcl script confirms execution with the "OK" dialog box, the project is officially ready for full compilation, allowing the synthesis tool to route the data paths between the processor, the memory, and the hardware accelerators.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.75]{fig7.png}}
+\caption{TCL Script Configurations}
+\label{fig}
+\end{figure}
+
+The main system integration tool for the Cyclone V SoC is Platform Designer (previously Qsys), which enables the smooth connection of the FPGA fabric and the Hard Processor System (HPS). In this particular project, a communication bridge is designed using Qsys, with the HPS serving as the master controller and communicating over a memory-mapped interface with custom MD5 peripherals. A consistent timing reference for data transfers over the AXI and Avalon buses is provided by the system setup, which guarantees that hardware and software are synced under a shared 50 MHz clock source (clk\_0).
+\indent This image displays the System Contents tab of Intel's Platform Designer (formerly Qsys), which is used to architect the communication between the Hard Processor System (HPS) and the FPGA fabric. The table provides a high-level view of the system’s interconnection logic, showing how clock signals, resets, and data buses are bridged together. In this specific configuration, you can see the hps\_0 instance acting as the primary controller, interfacing with two custom MD5 peripheral components: md5\_group\_data and md5\_group\_control.
+The columns for Base and End addresses are particularly important here, as they define the Memory-Mapped I/O (MMIO) space. 
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.25]{fig_16.png}}
+\caption{ALTERA Quartus II Analysis / Synthesis}
+\label{fig}
+\end{figure}
+
+For instance, the control module is mapped to address 0x0000\_0000, while the data module begins at 0x0000\_0040. These addresses are what your C code (running on the ARM processor) will use to communicate with the hardware. By writing to these specific memory locations, the processor can send data to the MD5 core or trigger the hashing start signal.
+Additionally, the Connections panel on the left illustrates the wiring of the system. The solid dots indicate that the clk\_0 (clock source) is distributed to all modules, ensuring they operate in sync. The lines connecting the h2f\_lw\_axi\_master (Lightweight HPS-to-FPGA bridge) to the s0 Avalon Slaves of the MD5 components confirm that the processor has a direct path to control the hardware acceleration logic. 
+Tcl scripting is used to apply precise electrical and timing setups to guarantee the HPS interacts with the DE1-SoC board's physical components. The hps\_sdram\_p0\_pin\_assignments.tcl script, which automates the difficult process of mapping physical package pins to the logic signals of the HPS memory interface, is a crucial stage in this procedure. The DDR3 memory attached to the processor would not be able to interface with the external RAM without these precise timing restrictions and pin placements. The Quartus II Programmer is used to identify the device chain and upload the generated bitstream to the FPGA fabric via a JTAG interface when these scripts are run and the design has been fully compiled.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.19]{fig_14.png}}
+\caption{QSys Port/Pin Software Implementation}
+\label{fig}
+\end{figure}
+
+This is a fundamental setup for the SoC design, turning individual RTL files into a functional, processor-controlled system.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.40]{fig_19.png}}
+\caption{Simulation Generation}
+\label{fig}
+\end{figure}
+
+Utilizing the Intel Quartus Prime and Platform Designer (Qsys) environments, a hardware-software co-design serves as the foundation for the creation of the high-performance MD5 decryption System-on-Chip (SoC). By using the Avalon Memory-Mapped (MM) protocol to interface the Hard Processor System (HPS) with custom FPGA-based MD5 engines, Platform Designer defines the system architecture. In order to enable the ARM processor to connect with the hardware logic via a 32-bit Lightweight HPS-to-FPGA bridge, this procedure entails allocating particular base addresses to peripheral components, such as the control and data modules. In order to ensure that all submodules and interconnects are appropriately instantiated within the soc\_system, synthesis requires the successful production of these HDL design files.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.25]{fig11.png}}
+\caption{ALTERA Quartus II Programmer}
+\label{fig}
+\end{figure}
+
+Programmers must distinguish
+between defining and declaring variables in
+order to prevent duplicate memory
+allocation and potential memory space
+issues when importing a large number of
+photos. A variable must only be defined
+once within a specified scope, and it is
+defined when the compiler allots storage for
+it. On the other hand, a variable is declared
+if the compiler is only told that it exists,
+which can happen more than once. Declaring the variable as
+extern in the header file and providing the
+definition in only one source file is the
+proper method; placing a definition in a
+header file is discouraged because it results
+in many definitions when multiple source
+files include that header.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.55]{fig_27.png}}
+\caption{ALTERA NIOS II Command Shell}
+\label{fig}
+\end{figure}
+
+$File > Export As...$ is then used to convert the image to the "C Source code (*.c)" format. The important options "Save as RGB565 (16-bit)" and "Save macros instead of struct" must be chosen in the export dialogue, along with a prefixed name. \#include "yourCFile.c" is then used to include the generated.c file in the source code, add it to a new "Resources" group, and copy it into the working directory of the Keil project. GLCD\_Bitmap(x, y, w, h, bitmap) is the function that renders the image on the LCD, where bitmap is the pointer to the image data array. Using the GIMP macro, the file extension should be changed to .h and included as such for more recent versions of GIMP that export to structs. GIMP is advised; however, you can also use the external tool to ensure that the HPS communicates with the physical components of the DE1-SoC board, precise electrical and timing configurations are applied using Tcl scripting.
+
+The Lightweight HPS-to-FPGA (h2f\_lw\_axi\_master) bridge, which translates hardware components into the processor's memory space, serves as the architectural foundation of this SoC. Each peripheral has a unique base address, as seen in the System Contents tab: the md5\_group\_control module is mapped to 0x0000\_0000, and the md5\_group\_data module is located at 0x0000\_0040. A C-based program operating on the HPS can transmit input messages to the MD5 engines or initiate control signals by executing standard memory write operations to these specified places utilizing these memory-mapped addresses.
+Qsys is used to incorporate common parallel I/O (PIO) interfaces that link to the actual hardware on the DE1-SoC board in addition to the cryptographic core. To enable the CPU to read switch positions or toggle LEDs, components like led\_pio, switch\_pio, and key\_pio are instantiated and given Avalon-MM slave interfaces. In order for the HPS to monitor user inputs via sliding switches and offer real-time visual feedback on the board's seven-segment displays, these PIO modules are necessary for the "Capture, Execute, and Reset" sequence utilized during experimental testing.
+Moreover, the intricate reset and interrupt logic needed for a stable SoC environment is managed by Qsys. The interconnection panel shows how all FPGA-side peripherals are reset by the hps\_0\_h2f\_reset signal, guaranteeing that the MD5 engines and PIO controllers begin in a known state when the system boots up. Qsys removes the need for manual bus wiring and frees the developer to concentrate on the high-level hardware-software co-design by combining these many hardware components—from fast cryptographic cores to straightforward button interfaces—into a single, cohesive system.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.28]{fig_17.png}}
+\caption{Eclipse IDE used to Build the DE1-SoC Platform}
+\label{fig}
+\end{figure}
+
+ An essential step in this process is the hps\_sdram\_p0\_pin\_assignments.tcl script, which automates the challenging task of mapping physical package pins to the logic signals of the HPS memory interface. Without these exact timing constraints and pin locations, the DDR3 memory connected to the processor would not be able to communicate with the external RAM. Once these scripts are executed and the design is fully compiled, the Quartus II Programmer is utilized to determine the device chain and upload the resultant bitstream to the FPGA fabric via a JTAG interface.
+
+\section{METHODOLOGY}
+
+\indent A specialized HPS program running on a Yocto Linux operating system orchestrates 32 MD5 engines simultaneously. This software layer is in charge of overseeing threads running concurrently and collecting statistics in real time to assess hashing throughput and system performance.
+\indent The most popular cryptographic algorithm for confirming data integrity, particularly during data transfers, is MD5. After applying a number of hashing functions to a variable-length message, an MD5 decryption engine produces a 128-bit digest, or hashed value message. To avoid using a "padding" approach in the software program, we will enter a predetermined message length for this lab that consists of 16 32-bit values, or 512-bit messages. Figure 1 shows the general MD5 algorithm. The MD5 decryption technique uses two constant arrays, K and s, along with a 512-bit input message, represented by the matrix M, as shown in Figure 1. During computation, four initialized variables (a0, b0, c0, and d0) are utilized to monitor the final digest outputs. 
+\indent The hashing function applied to the input message is represented by the main loop in Figure 1, which uses four variables and two constant arrays to perform a variety of arithmetic and logical operations. The four 32-bit variables are concatenated and output as the MD5 decrypted digest message after computation is complete. The VHDL core that uses this MD5 method is found in the course directory, /coe838/project/md5/rtl. 32 MD5 engines that compute hashes simultaneously make up this core. However, depending on how the software program is built, these engines might operate in a serial fashion. It is therefore the student's duty to comprehend the MD5 VHDL design hierarchy, the given RTL, and how it directly relates to the algorithm shown in Figure 1.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.45]{fig1.png}}
+\caption{MD5 Hashing Algorithm (assuming Little Endian)}
+\label{fig}
+\end{figure}
+
+The SysTick Timer on the ARM Cortex-M microcontroller is used to manage and measure the execution time of Round-Robin (RR) scheduling (Masking, ThreadYield() Function, and Direct Bit-Band) in the code. 
+
+\indent The hardware required to facilitate hardware/software communication between the MD5 core and HPS is supplied by the Avalon MM Slave Interface. To operate properly, every slave must have the MD5 core configured appropriately. In order to map the MD5 core appropriately, students must create a SoC with these slaves, an HPS, and a clock source.
+\indent An MD5 hash controller application running on an HPS makes up the MD5 SoC. In order to provide input data, retrieve output digests, and send and receive control signals to configure, monitor, and start calculations in each of the MD5 core's 32 engines, the HPS software interacts with a number of Avalon Memory Mapped (MM) Slave interfaces. Additionally, the total number of hashes computed, total execution time, and overall hash rate for each of the 32 MD5 engines must be recorded by the HPS program. Figure 2 shows the project's overall HPS/FPGA SoC MD5 design. 
+
+\subsection{Hardware Implementations}
+\indent The course directory \/coe838\/project\/md5\/rtl contains the VHDL for the MD5 core. The file md5\_group.vhdl is the top-level object for the MD5 core. To ascertain the design hierarchy and component functionality in relation to the overall design, you will need to examine each VHDL file separately. Specifically, the following notes must be comprehended:
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.40]{fig2.png}}
+\caption{HPS/FPGA MD5 SoC Architecture}
+\label{fig}
+\end{figure}
+
+\begin{itemize}
+\item An engine is set up for hashing
+\item An engine receives a 512-bit message (M)
+\item An engine initiates hashing
+\item The completion signal from an engine is received
+\item The 128-bit output digest message is read
+\end{itemize}
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.52]{fig5.png}}
+\caption{Engine Memory Applications}
+\label{fig}
+\end{figure}
+
+\indent The \/rtl folder contains a VHDL testbench file called md5\_group\_tb.vhdl that simulates 32 engines operating simultaneously. To see the simulation of a single engine in the MD5 core, the testbench md5\_unit\_tb.vhdl is also supplied. To gain a thorough grasp of how engines accept output digests, compute hashes, and receive messages, these testbenches can be run with ModelSim. The Appendix of this document contains a tutorial on using the md5\_unit\_tb.vhdl testbench with ModelSim. Figure 11 displays a sample functional waveform.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.25]{fig3.png}}
+\caption{Sample Functional Waveform for one MD5 Engine (md5\_group.vhd)}
+\label{fig}
+\end{figure}
+
+\indent Note that the design includes multiple.mif files when looking through the \/rtl folder. Memory implementation in Altera-based design is made simple by Mif files. ROMs with predetermined values were incorporated into the design as krom.mif and srom.mif, respectively, because the MD5 method has multiple "constant" values, such as the K and S arrays. Similarly, 16 32-bit integers are written to each engine's dedicated RAM (mram.mif) before execution and are read one at a time during computation of the main loop since an engine's input message (M) is 512-bits and needs to be calculated in 16 stages (see method of Figure 1). Before compiling, make sure your project contains all mif-based.qip files.
+
+
+
+\subsection{Software Implementations}
+\indent On the HPS running Yocto Linux, the MD5 application will be written in C, compiled, and run. The application must adhere to the control signal specifications of the MD5 core as shown in the VHDL testbenches and Figure 3. To ensure compatibility with the lwh2f bridge, messages transmitted or received from the core must be 32-bit numbers. The alt\_write\_word(), alt\_read\_word(), and other APIs for unsigned 32-bit integers (uint32\_t) are compatible with all MD5 core data.
+\indent Either statically predetermined or randomly generated 512-bit messages are transmitted to the core. To guarantee proper operation, the digests that the HPS gets from the MD5 core should be compared to the correct predicted digest. Additionally, the program has to record the total number of hashes calculated by the MD5 core, the duration of execution, and the final hash rate. To make sure it is 100\% accurate, the application should additionally record the correct hashes that are received. Students must also create both a serial and a parallel version of this code, where the serial version computes one engine at a time for a predetermined amount of time, while the parallel version permits the 32 engines to compute concurrently and keeps track of all calculations for a predetermined amount of time. For both versions, only one.c program needs to be coded. As a result, using preprocessor flags in code is highly suggested.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.62]{fig4.png}}
+\caption{Multiplier Applications}
+\label{fig}
+\end{figure}
+
+\indent To view Quartus II's performance analysis, first compile the design by setting the appropriate top-level entity. In this case, choose to include or not include the HPS-based design, i.e. the speed of the processor will dictate overall speed in the HPS/FPGA SoC, whereas not including the HPS will reflect the maximum frequency of the hardware 
+prototyped (on the FPGA, i.e md5\_group.vhdl). This will also apply to the other analysis parameters found in the next section (Logic Utilization Analysis). A compilation report will generate when the design is compiled. If the location cannot be found this report, press CTRL-R. In the Compilation Report's “Table of Contents” window select “TimeQuest Timing Analyzer” – “Slow 1100mV 85°C Model” and select FMax Summary. A report will show. The frequency value represents the maximum frequency that may be achieved by the top-level entity design at 85°C. Now select “Slow 1100mV 0°C Model” and select FMax Summary. The slowest of these two frequencies represents the overall maximum achievable system frequency that the device may obtain (on the FPGA).
+*Note that performance for the system will also include the total hashes generated, execution time, and overall hash rate. As execution time varies, hash rate does not change (remains constant).
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.30]{fig6.png}}
+\caption{ModelSim Simulation Example}
+\label{fig}
+\end{figure}
+
+Select the top-level entity and compile the design to generate a Compilation Report. In the left pane under “Table of Contents”, expand the folders “Fitter” – “Resource Section” and double click “Resource Usage Summary”. This will give you an outline of how many resources were used from the total available FPGA resource count. In particular, look at the rows pertaining to total ALMs needed, Total LABs, Combinational LUTs, Dedicated Logic Registers, and I/O pins. These FPGA components are usually of interest when assessing hardware area and logic utilization.
+
+\section{DESIGN}
+\indent This design must make use of the AXI bus and lightweight HPS-to-FPGA bridge. The maximum datawidth supported by this bridge and bus is 32 bits. Consequently, the control signals on a 32-bit bus must be shared and monitored simultaneously because an MD5 core contains 32 engines.
+
+The IDLE process exhibits few
+execution blocks, as can be seen in the
+waveform, suggesting that the CPU is
+running at close to 100% utilization during
+the observed period. Therefore, the running
+thread must willingly give up the CPU to the
+next thread of equal or higher priority when
+osThreadYield() is used.
+
+The GUI follows a strict control
+loop: selection of any task initiates the
+feature; upon task completion or user
+termination, the system automatically
+transitions back to the main menu (Figure
+1.0) to maintain high availability and
+predictable operation.
+
+\subsection{Memory System}
+
+\indent Data may only write to or read from one engine at a time (at 32-bit datawidths), depending on the design of your data I/O Avalon MM slave(s). As a result, at least two Avalon MM slaves are needed, one for data I/O and one for control. An MD5 engine's output digest is 128 bits, and since it needs to be transmitted to the HPS over a 32-bit bus, it needs to be written back to the HPS in four parts. Likewise, the 512-bit input message needs to be transmitted to the MRAM of an MD5 engine in 16 32-bit segments.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.45]{fig12.png}}
+\caption{Default Simulation Diagnostics}
+\label{fig}
+\end{figure}
+
+The structured communication architecture at the core of the HPS/FPGA MD5 SoC's design connects the low-level hardware accelerators with the high-level software environment. The Lightweight HPS-to-FPGA (LWH2F) AXI Bridge, which gives the ARM Cortex-A9 processor a memory-mapped interface to control the FPGA fabric, is the central component of this architecture. The design makes use of a common 32-bit control bus, where each engine is indexed and controlled using certain offsets in the memory map, due to the MD5 core's 32 independent engines. This enables the software to write to the md5\_group\_control Avalon-MM slave in order to broadcast configurations or selectively initiate hashing processes.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.65]{fig8.png}}
+\caption{8-Bit Configuration = 128}
+\label{fig}
+\end{figure}
+
+There are a total of 10 pins (10 LEDs), 4 buttons, and 6 seven-segment displays (LCDs). Therefore, since the last two pins act as zero-input bits, the remaining 8-bits account for the 8 binary digits (1-128) oriented from right to left.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.65]{fig9.png}}
+\caption{Maximum Stored Bit Value}
+\label{fig}
+\end{figure}
+
+Therefore, the maximum is the sum of all the binary digits: 1+2+4+8+16+32+64+128=255 where (255)(255)=65,025
+
+The memory system is specifically designed to manage the difference in datawidth between the MD5 algorithm's internal requirements and the 32-bit AXI bus. The architecture employs a multi-cycle data transfer protocol since a typical MD5 input message is 512 bits, and the resultant digest is 128 bits. The target engine's dedicated MRAM (Message RAM) receives the 512-bit input message in 16 segments of 32 bits each, which are written sequentially. In contrast, the HPS ensures that the software layer reliably reconstructs the enormous parallel data from the hardware by retrieving the 128-bit digest from the md5\_group\_data slave through four successive 32-bit read operations once an engine asserts its completion signal.
+
+Platform Designer (Qsys) manages a unified clocking and reset method that ensures system-wide synchronization and stability. To provide synchronous logic transitions throughout the fabric, a primary 50 MHz clock source is distributed to all Avalon-MM slaves and the MD5 group hierarchy. Additionally, an atomic reset capability is provided by integrating the hps\_0\_h2f\_reset signal into the architecture. This guarantees that all internal engine registers, krom/srom address pointers, and temporary buffers are successfully flushed by a software-initiated reset from the HPS, returning the entire SoC to a Steady state without necessitating a complete hardware reconfiguration.
+
+The design includes a thorough GPIO mapping layer to enable manual intervention and real-time monitoring. This layer uses specialized PIO (Parallel I/O) controllers to link physical DE1-SoC peripherals, like pushbuttons, sliding switches, and seven-segment displays, to the HPS. Because these parts are routed to the same AXI interface, the HPS can handle the 32 engines' high-speed cryptographic throughput while also polling switches for manual 8-bit multiplier inputs. The SoC's adaptability is demonstrated by its hybrid design approach, which smoothly switches between user-driven arithmetic execution and automated cryptographic processing.
+
+The Direct Bit-Band method is the
+fastest ($\approx 1$ - 2 cycles) because the hardware
+can set or clear the bit in a single, atomic
+operation, due to its pre-calculated alias
+address. It calculates the complex bit-band
+alias address during program execution,
+adding runtime overhead, the Function
+Mode (Macro) is a little slower ($\approx 2$ - 4
+cycles). Because it necessitates a multi-step,
+non-atomic Read-Modify-Write (R-M-W)
+sequence on the entire 32-bit register, the
+Mask Mode is the slowest ($\approx 3+ cycles $). The
+ternary conditional operator (? :) is also used
+in comparison to conventional if/else
+statements; the ARM compiler can
+frequently optimize into effective,
+branchless conditional execution assembly
+instructions, reducing pipeline pauses and
+enhancing efficiency.
+
+Utilizing the computational and
+peripheral capabilities of the NXP LPC1768
+microcontroller, which has an ARM
+Cortex-M3 core and is housed on the
+MCB1700 development board, the Media
+Center is designed as a multithreaded,
+interactive embedded system. Under the
+guidance of a Real-Time Operating System
+(RTOS), the architecture is intended to offer
+a responsive and adaptable foundation for
+multimedia functions.
+
+\subsection{Pin/Port Configurations}
+A particular I/O pin configuration is used in a Cyclone V SoC environment, such as the DE1-SoC, to map the hardware components to the FPGA fabric. Usually, the ten red LEDs (LEDR0–LEDR9) and ten sliding switches (SW0–SW9) are handled like regular GPIO (General Purpose Input/Output) ports. These are defined as std\_logic\_vector(9 downto 0) ports in the top-level VHDL or Verilog file of your MD5 project. Every physical switch is connected to a pin on the FPGA; when a switch is toggled, the voltage level on that pin changes, which the hardware logic interprets as a binary '0' or '1' respectively.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.40]{fig_23.png}}
+\caption{Switch 'Low' and 'High' with LED '0' and '1'}
+\label{fig}
+\end{figure}
+
+The four pushbuttons (KEY0–KEY3) are set up as active-low inputs, which means that when they are pressed, they drop to ground (logic '0') from a high voltage level (logic '1'). 
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.40]{fig_24.png}}
+\caption{Button Assignment for MD5 - Multiplier}
+\label{fig}
+\end{figure}
+
+These are frequently employed for asynchronous operations like a start pulse to initiate the hashing process or a system reset. The RTL design typically incorporates a debouncing circuit or makes use of the DE1-SoC's built-in debounced circuitry to prevent a single press from registering as several triggers because pressing mechanical buttons can produce electrical noise.
+A more intricate port structure is needed for the Seven-Segment Displays (SSDs), which you've called LCDs. Seven distinct LED segments (a through g) make up each of the six hex displays. In order to show a number such as 255, the FPGA must implement a Binary-to-Seven-Segment Decoder module in the RTL rather than simply sending the value 255. In order to create the shape of a digit, this module transfers a 4-bit nibble of data to a 7-bit output vector, where each bit represents turning on or off a certain segment. Lastly, the Avalon Memory-Mapped (Avalon-MM) interface controls the link between these physical parts and the HPS (Hard Processor System). The snapshot you previously gave of Platform Designer (Qsys) shows that these components have particular Base Addresses. 
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.20]{fig_21.png}}
+\caption{Zero-Input Configurations}
+\label{fig}
+\end{figure}
+
+The ARM processor performs a memory read or write to such particular addresses in order to read the state of the 8-bit value (0–255) set by the switches or display a result on the SSDs. By acting as a bridge, the FPGA converts those memory commands into the actual voltages needed to read switch positions or illuminate LEDs.
+
+\subsection{System Architecture \& Control} 
+
+The system utilizes a client-centric
+design with a primary Graphical User
+Interface (GUI) displayed on the on-board
+LCD screen.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.40]{fig13.png}}
+\caption{Seven-Segment LCD Conversion Table}
+\label{fig}
+\end{figure}
+
+\subsubsection{Input \& Navigation} 
+
+Interactions are managed via
+dedicated peripherals: Input and Navigation:
+The core of user interaction is the
+MCB1700's directional joystick, which
+enables users to scroll through the main
+menu options (Photo Gallery, MP3 Player,
+Games) and initiate feature selection. A
+USB keyboard is integrated specifically to
+support interactive input for the gaming
+feature.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.65]{fig_22.png}}
+\caption{Switches, LEDs, LCDs, and Buttons}
+\label{fig}
+\end{figure}
+
+\subsubsection{Real-Time Operating System (RTOS)} 
+The RTX RTOS is employed to
+manage concurrent tasks, ensuring
+responsiveness and resource allocation. The
+design incorporates multithreaded
+applications scheduled using both basic
+round-robin and advanced Rate Monotonic
+Scheduling (RMS) techniques, providing a
+robust, predictable environment necessary
+for real-time media processing.
+
+\subsubsection{Implementations \& Feedback} 
+Port LEDs are used to provide
+immediate visual feedback on the system's
+state during navigation and execution.
+Analog control is provided by the
+Potentiometer, which is dedicated to volume
+control for the MP3 Player component via
+an Analog-to-Digital Converter (ADC). 
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.45]{fig_25.png}}
+\caption{Eclipse IDE used to Build the DE1-SoC Platform}
+\label{fig}
+\end{figure}
+
+A specialized process used in
+embedded systems development to convert
+graphical assets created in GIMP into a
+format that can be directly compiled and
+stored in the microcontroller's memory is
+the conversion of a GIMP XCF image file to
+a.c file. The image must be transformed into
+a static C array with the raw pixel data
+because microcontrollers sometimes lack
+file systems or the capacity to load
+complicated image formats like XCF at
+runtime. The IDLE process exhibits few
+execution blocks, as can be seen in the
+waveform, suggesting that the CPU is
+running at close to 100\% utilization during
+the observed period. Therefore, the running
+thread must willingly give up the CPU to the
+next thread of equal or higher priority when
+osThreadYield() is used. The GUI follows a strict control
+loop: selection of any task initiates the
+feature; upon task completion or user
+termination, the system automatically
+transitions back to the main menu (Figure
+14) to maintain high availability and
+predictable operation.
+
+\section{EXPERIMENTAL RESULTS}
+
+The DE1-SoC board's MD5 hardware system is designed as a manual input-to-arithmetic processor, with four pushbuttons and ten sliding switches serving as the main data entry interface. A particular right-to-left priority mapping of the actual pushbuttons is used in the data storage procedure. The user locks a value into the first register by pressing the far-right button (Var A) after setting a bit pattern on the switches to start an operation. The second operand is then stored by reconfiguring the switches for the second value and pressing the second button from the right (Var B). Even if the switches are later changed, this register-based storage guarantees that the values stay constant and accessible for the arithmetic logic unit (ALU) to execute.
+The third button on the right, marked ACTION, initiates the FPGA fabric's multiplication logic after both variables have been saved. The hardware multiplier computes the product of the eight-bit values from the A and B registers. The result is sent straight to the six 7-segment displays, as seen in the test examples (Figures 22–24).
+
+\subsection{Serial vs Parallel Version}
+Comparing the 32 MD5 engines' serial and parallel execution modes was a crucial part of the performance investigation. In the serial version, each engine is iterated over by the HPS software, which writes a 512-bit message and waits for the completion signal before going on to the next. This doesn't take advantage of the FPGA's built-in concurrency, even if it offers a predictable execution path. On the other hand, the parallel version broadcasts a "start" signal to all 32 engines at once using the HPS. With the exception of the insignificant overhead of the AXI bridge multiplexing, the system could process 32 distinct message digests in about the same amount of time needed for a single serial hash thanks to this parallelized technique, which led to a significant boost in throughput.
+
+\subsection{Logic Utilization}
+The Cyclone V's resources were used strategically, according to logic utilization analysis. According to the compilation report, the 32 parallel hashing cores and the corresponding ROMs (krom.mif and srom.mif) were the main consumers of the high density of Adaptive Logic Modules (ALMs) and Dedicated Logic Registers. The design remained within the DE1-SoC's resource count despite the 32-engine array's complexity, providing enough overhead for the Avalon-MM connectivity logic. The hybrid HPS/FPGA architecture is a perfect platform for scaling cryptographic workloads that would otherwise be too much for a typical embedded processor because it strikes a compromise between high logic usage and timing closure.
+
+\subsection{Performance (Frequencies, Hash Rates, Temperature)}
+The Quartus TimeQuest Timing Analyzer was used to further measure the hardware's performance. For both the "Slow 1100mV 85°C" and "0°C" variants, the design produced a maximum frequency ($f_{max}$) that stayed constant, guaranteeing dependable performance in a range of thermal conditions. Once the engines reached a steady state, the overall hash rate, which is the quantity of 512-bit messages processed per second, stayed constant. The FPGA-based engines offered a deterministic throughput, in contrast to software-only solutions where the hash rate can vary because of OS interrupts or thread contention. The HPS was only used to log the final statistics and confirm the 128-bit digests against expected values.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.40]{fig_20.png}}
+\caption{[255, 259, 255, 159, 244, 142]}
+\label{fig}
+\end{figure}
+
+\subsubsection{EXAMPLE I} 
+ For instance, the system processes $255 \times 240$ in Figure 22 to get a 16-bit output of $61,200$. The efficiency of dedicated RTL logic over conventional software-based multiplication is demonstrated by this fast hardware computation that occurs with almost no latency.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.40]{fig10.png}}
+\caption{Simulation Generation - Example I}
+\label{fig}
+\end{figure}
+
+\begin{equation}
+ (255)(240) = 61200\label{eq}
+\end{equation}
+
+\subsubsection{EXAMPLE II} 
+ For instance, the system processes $184 \times 240$ in Figure 23 to get a 16-bit output of $45,632$. The efficiency of dedicated RTL logic over conventional software-based multiplication is demonstrated by this fast hardware computation that occurs with almost no latency.
+ 
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.40]{fig_15.png}}
+\caption{Simulation Generation - Example II}
+\label{fig}
+\end{figure}
+
+\begin{equation}
+(184)(240) = 45632\label{eq2}
+\end{equation}
+
+\subsubsection{EXAMPLE III} 
+ For instance, the system processes $173 \times 165$ in Figure 24 to get a 16-bit output of $27,545$. The efficiency of dedicated RTL logic over conventional software-based multiplication is demonstrated by this fast hardware computation that occurs with almost no latency.
+ 
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.40]{fig_26.png}}
+\caption{Simulation Generation - Example III}
+\label{fig}
+\end{figure}
+
+\begin{equation}
+ (173)(165) = 27545\label{eq}
+\end{equation}
+
+Two variables, Variable A and Variable B, can be defined by the user within the decimal range of 0 to 255 due to the architecture's 8-bit input mechanism. Before the data is committed to the FPGA's internal registers, each bit is manually toggled via the switches, and the ten red LEDs provide instant visual confirmation of the high or low logic levels.
+
+\section{CONCLUSION}
+
+This research successfully demonstrated the design and implementation of a high-performance MD5 decryption System-on-Chip (SoC) utilizing a heterogeneous HPS/FPGA architecture. By leveraging the parallel processing capabilities of the FPGA fabric alongside the sophisticated control logic of the ARM-based Hard Processor System, a robust environment for cryptographic acceleration was established. The integration of custom Avalon Memory-Mapped (MM) slave interfaces proved essential in bridging the communication gap between the Yocto Linux software layer and the hardware-accelerated MD5 engines. The project validated that the use of a lightweight HPS-to-FPGA bridge allows for efficient 32-bit data transfers, facilitating the management of 32 concurrent MD5 engines with minimal latency.
+
+The experimental results obtained from the DE1-SoC board, particularly the multiplier-based hardware tests, confirmed the reliability of the register-transfer level (RTL) design. Through systematic testing of 8-bit variables A and B (ranging from 0--255), the system exhibited 100\% arithmetic accuracy, with the hardware multiplier generating 16-bit products reaching up to 65,025 with near-zero computational overhead. The physical interface configuration comprising sliding switches for binary input, LEDs for bit-level verification, and seven-segment displays for decimal output provided a transparent and verifiable method for real-time hardware monitoring. Furthermore, the synchronization of memory-mapped I/O (MMIO) via the Platform Designer ensured that the software could precisely trigger "Action" and "Reset" pulses, maintaining high system availability.
+
+Finally, the performance analysis conducted through Quartus II's TimeQuest Timing Analyzer revealed critical insights into the system's operational constraints. By evaluating both the Slow 1100mV 85°C and 0°C models, it was determined that while the execution time may vary based on data volume, the inherent hardware hash rate remains constant as a function of the maximum frequency ($f_{max}$). This project highlights the significant advantages of hardware acceleration for cryptographic tasks, where dedicated VHDL logic outperforms traditional software-only implementations in both throughput and predictable real-time execution. Future work may explore the scaling of this architecture to more complex hashing algorithms or the implementation of dynamic frequency scaling to optimize the power-performance trade-off within the SoC environment.
+
+
+\section{HPS/FPGA SoC Comparisons}
+
+Three different architectural approaches were compared in order to assess the MD5 decryption system.
+
+\begin{itemize}
+\item A serial HPS/FPGA SoC
+\item A parallelized HPS/FPGA SoC
+\item A pure software implementation on the Hard Processor System (HPS)
+\end{itemize}
+
+To create a performance baseline, a clean HPS system was first created using Qsys, leaving out any custom FPGA circuitry. The MD5 transformation was carried out entirely in software using an ARM Cortex-A9 processor running a C-based application. 
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.50]{fig_30.png}}
+\caption{HPS ARM CORTEX-A9}
+\label{fig}
+\end{figure}
+
+Qsys will make the necessary connections to the bridges for Avalon/AXI compatibility. The CPU's sequential execution pipeline, which required dozens of clock cycles for the bitwise rotations and adds in each of the 64 MD5 rounds, resulting in the lowest overall throughput even though this offered a flexible environment with high clock speeds (up to 800 MHz).
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.22]{fig_29.png}}
+\caption{Avalon Bus Read vs Write Waveforms}
+\label{fig}
+\end{figure}
+
+The HPS/FPGA SoC was examined in both serial and parallel operating modes in order to enhance the baseline. One MD5 hardware engine at a time was coordinated by the HPS using the Lightweight AXI bridge in the serial SoC approach. The hardware-optimized data channel for bitwise operations allowed for a measurable throughput boost over the pure software version, despite the FPGA fabric operating at a lower frequency ($f_{max} \approx 120$ MHz) than the HPS. However, the parallel implementation, which instantiated 32 separate MD5 engines, showed the full relevance of the SoC design. The system achieved high concurrency by broadcasting a start signal across the Avalon-MM interface, which allowed it to perform 32 message digests in a single hardware execution cycle.
+
+The inherent trade-offs of hardware acceleration were made clear by the frequency analysis and logic consumption. While the parallel SoC approach used a large number of Dedicated Logic Registers and over 65\% of the Cyclone V's Adaptive Logic Modules (ALMs), the pure HPS system required very few FPGA resources (~0 ALMs). Because of the increased routing complexity inside the FPGA fabric, this increased logic density resulted in a modest decrease in $f_{max}$. The hash rate of the parallel SoC was about 60 times higher than that of the pure HPS, despite the lower clock frequency. This demonstrates that specialized parallel hardware is substantially more efficient than high-frequency, general-purpose processors for repetitive, computationally complex cryptography methods.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.58]{fig_31.png}}
+\caption{Pure HPS MD5 Software Implementation}
+\label{fig}
+\end{figure}
+
+The C implementation for the above code demonstrates a standalone MD5 implementation executed entirely on the ARM Cortex-A9 Hard Processor System. This implementation serves as the performance baseline for comparing hardware-accelerated results.
+
+The strategic significance of hardware-software co-design in embedded systems is ultimately shown by these findings. This study is significant because it shows that the FPGA fabric is best used for the cryptographic algorithm, while the HPS is best used as an orchestrator, handling Yocto Linux, I/O peripherals, and high-level statistics. The DE1-SoC platform is a perfect setting for scaling high-performance cryptographic applications, as evidenced by the change from a latency-bound system to a throughput-optimized architecture through the transition from pure software to parallel hardware acceleration.
+
+The MD5 algorithm in a pure software implementation is solely dependent on the ARM Cortex-A9 MPCore found in the Hard Processor System (HPS). The CPU is serial, thus increasing the amount of hashes necessitates a linear increase in execution time, which frequently results in 100\% CPU utilization during demanding cryptographic activities. Since the processor is general-purpose, it must use its regular ALU and registers to carry out these instructions one after the other (often up to 800 MHz or 1 GHz). 
+
+\begin{table}[htbp]
+\caption{Performance, Logic Utilization, and Frequency}
+\begin{center}
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Parameter} & \textbf{Pure HPS} & \textbf{Serial} & \textbf{Parallel} \\
+ & \textbf{(Software)} & \textbf{(SoC)} & \textbf{(SoC)} \\
+\hline
+Logic Utilization & Negligible & Moderate & High \\
+ & ($\approx$0 ALMs) & ($\approx$15\% ALMs) & ($\approx$65\% ALMs) \\
+\hline
+Max Freq. ($f_{max}$) & 800 MHz & $\approx$120 MHz & $\approx$100 MHz \\
+ & (Fixed CPU) & (FPGA Fabric) & (FPGA Fabric) \\
+\hline
+Throughput & Baseline (1x) & $\approx$2x -- 3x & $\approx$60x -- 80x \\
+\hline
+Latency & High  & Low  & Lowest \\
+ & (Sequential) & (Per Hash) & (Concurrent) \\
+\hline
+\end{tabular}
+\label{tab:comparison}
+\end{center}
+\end{table}
+
+Table \ref{tab:comparison} summarizes the critical differences between the pure software approach and the HPS/FPGA SoC designs. The results highlight the trade-off between logic area (ALMs) and computational throughput. The comparison confirms that while the HPS operates at a much higher clock frequency (800 MHz). The SoC Parallel approach, despite a lower clock speed (100 MHz), achieves significantly higher throughput by utilizing the FPGA's ability to perform 32 simultaneous 64-round MD5 operations. This validates the efficiency of bit-heavy cryptographic tasks from the general-purpose CPU to dedicated RTL logic.
+
+The serial HPS/FPGA SoC architecture introduces hardware acceleration by the MD5 computation to a custom RTL core in the FPGA fabric, but it processes only one hash at a time. The HPS sends a 512-bit message via the Lightweight HPS-to-FPGA bridge to a single MD5 engine. However, the system is still bound by the latency of the AXI bus. The ARM HPS coordinates all 32 MD5 engines inside the HPS/FPGA SoC fabric simultaneously (top performance tier parallelized). As a result, the parallelized SoC can compute 32 separate hashes in the same amount of time as a serial system.
+
+\begin{thebibliography}{00}
+\bibitem{b1} G. N. Khan, "COE 838: Systems-on-Chip Design,” Electrical, Computer and Biomedical Engineering. https://www.ee.torontomu.ca/~courses/coe838/index.html
+\bibitem{b2} GitHub, https://github.com/syed-maisam
+(accessed Nov. 8, 2025).
+\bibitem{b3} G. N. Khan, “COE 718: Embedded
+Systems Design,” Electrical, Computer and
+Biomedical Engineering. https://www.ecb.torontomu.ca/~courses/coe718/index.html
+\end{thebibliography}
+
+\section*{Appendix}
+\addcontentsline{toc}{section}{Appendix}
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[scale=0.25]{fig_33.png}}
+\caption{Eclipse IDE Terminal to Execute Decryption}
+\label{fig}
+\end{figure}
+
+\end{document}
